@@ -94,6 +94,13 @@ DOC_PATH = os.getenv("DOC_PATH", "./my-docs")
 # Startup event
 
 
+@app.get('/root')
+async def root():
+    return {
+        "health": "ok",
+        "version": "0.0.1",
+    }
+
 @app.on_event("startup")
 def startup_event():
     os.makedirs("outputs", exist_ok=True)
@@ -104,15 +111,44 @@ def startup_event():
 # Routes
 
 # Create a folder to upload files per user's given folder name
+# @app.post("/create-folder/{folder_name}")
+# async def create_folder(folder_name: str):
+#     """
+#     Create a new folder under the DOC_PATH directory.
+#     """
+#     folder_path = os.path.join(DOC_PATH, folder_name)
+#     try:
+#         os.makedirs(folder_path, exist_ok=True)
+#         return {"status": "success", "message": f"Folder '{folder_name}' created successfully."}
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/create-folder/{folder_name}")
 async def create_folder(folder_name: str):
     """
     Create a new folder under the DOC_PATH directory.
     """
     folder_path = os.path.join(DOC_PATH, folder_name)
+    
+    # Check if folder already exists
+    if os.path.exists(folder_path):
+        raise HTTPException(status_code=400, detail=f"Folder '{folder_name}' already exists.")
+    
     try:
         os.makedirs(folder_path, exist_ok=True)
         return {"status": "success", "message": f"Folder '{folder_name}' created successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/list-folders")
+async def list_folders():
+    """
+    List all folders under the DOC_PATH directory.
+    """
+    try:
+        # Get all directories under DOC_PATH
+        folders = [f for f in os.listdir(DOC_PATH) if os.path.isdir(os.path.join(DOC_PATH, f))]
+        return {"status": "success", "folders": folders}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -194,53 +230,20 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 
-# New endpoint to generate a report synchronously
-# @app.post("/generate-report")
-# async def generate_report(request: GenerateReportRequest):
-#     try:
-#         # Extract inputs from the request
-#         task = request.prompt
-#         tone = request.tone
-#         report_source = request.report_source
-#         report_type = request.report_type
-
-#         # Run the research task synchronously
-#         report = await run_agent(
-#             task=task,
-#             report_type=report_type.value,  # Pass the enum value
-#             report_source=report_source.value,  # Pass the enum value
-#             tone=tone.value,  # Pass the enum value
-#             websocket=None,  # No WebSocket for this endpoint
-#             headers=None, 
-#             source_urls=[],  # No specific URLs
-#             document_urls=[], # Add headers if needed
-#             query_domains=[],  # Add query domains if needed
-#             config_path="default"  # Add config path if needed
-#         )
-
-#         # Return the generated report
-#         return {"status": "success", "report": report}
-
-#     except Exception as e:
-#         # Handle errors
-#         raise HTTPException(status_code=500, detail=str(e))
-
-
-
-@app.post("/generate-report")
-async def generate_report(request: GenerateReportRequest, folder_name: str = None, 
-                          tavily_api_key: str = None, open_ai_key
-                          : str = None):
+@app.get("/generate-report")
+async def generate_report(
+    prompt: str,  # Query parameter for the task/prompt
+    tone: Tone,  # Query parameter for the tone
+    report_source: ReportSource,  # Query parameter for the report source
+    report_type: ReportType,  # Query parameter for the report type
+    folder_name: str = None,  # Optional query parameter for the folder name
+    tavily_api_key: str = None,  # Optional query parameter for the Tavily API key
+    open_ai_key: str = None  # Optional query parameter for the OpenAI API key
+):
     """
-    Generate a report using the specified folder's documents.
+    Generate a report using query parameters.
     """
     try:
-        # Extract inputs from the request
-        task = request.prompt
-        tone = request.tone
-        report_source = request.report_source
-        report_type = request.report_type
-
         # If the user provides a Tavily API key, update the environment variables
         if tavily_api_key:
             os.environ["TAVILY_API_KEY"] = tavily_api_key
@@ -261,7 +264,7 @@ async def generate_report(request: GenerateReportRequest, folder_name: str = Non
 
         # Run the research task synchronously
         report = await run_agent(
-            task=task,
+            task=prompt,
             report_type=report_type.value,  # Pass the enum value
             report_source=report_source.value,  # Pass the enum value
             tone=tone.value,  # Pass the enum value
@@ -279,6 +282,59 @@ async def generate_report(request: GenerateReportRequest, folder_name: str = Non
     except Exception as e:
         # Handle errors
         raise HTTPException(status_code=500, detail=str(e))
+
+# @app.post("/generate-report")
+# async def generate_report(request: GenerateReportRequest, folder_name: str = None, 
+#                           tavily_api_key: str = None, open_ai_key
+#                           : str = None,):
+#     """
+#     Generate a report using the specified folder's documents.
+#     """
+#     try:
+#         # Extract inputs from the request
+        
+#         tone = request.tone
+#         report_source = request.report_source
+#         report_type = request.report_type
+
+#         # If the user provides a Tavily API key, update the environment variables
+#         if tavily_api_key:
+#             os.environ["TAVILY_API_KEY"] = tavily_api_key
+
+#         if open_ai_key:
+#             os.environ["OPENAI_API_KEY"] = open_ai_key
+
+#         # Determine the document path
+#         if folder_name:
+#             document_path = os.path.join(DOC_PATH, folder_name)
+#             if not os.path.exists(document_path):
+#                 raise HTTPException(status_code=404, detail=f"Folder '{folder_name}' does not exist.")
+#         else:
+#             document_path = DOC_PATH
+
+#         # Get the list of documents in the folder
+#         document_urls = [os.path.join(document_path, f) for f in os.listdir(document_path) if os.path.isfile(os.path.join(document_path, f))]
+
+#         # Run the research task synchronously
+#         report = await run_agent(
+#             task=task,
+#             report_type=report_type.value,  # Pass the enum value
+#             report_source=report_source.value,  # Pass the enum value
+#             tone=tone.value,  # Pass the enum value
+#             websocket=None,  # No WebSocket for this endpoint
+#             headers=None,
+#             source_urls=[],  # No specific URLs
+#             document_urls=document_urls,  # Use documents from the specified folder
+#             query_domains=[],  # Add query domains if needed
+#             config_path="default"  # Add config path if needed
+#         )
+
+#         # Return the generated report
+#         return {"status": "success", "report": report}
+
+#     except Exception as e:
+#         # Handle errors
+#         raise HTTPException(status_code=500, detail=str(e))
     
 
 
