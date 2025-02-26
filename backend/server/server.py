@@ -105,7 +105,7 @@ async def root():
 def startup_event():
     os.makedirs("outputs", exist_ok=True)
     app.mount("/outputs", StaticFiles(directory="outputs"), name="outputs")
-    os.makedirs(DOC_PATH, exist_ok=True)
+    # os.makedirs(DOC_PATH, exist_ok=True)
     
 
 # Routes
@@ -157,12 +157,6 @@ async def read_root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request, "report": None})
 
 
-# @app.get("/files/")
-# async def list_files():
-#     files = os.listdir(DOC_PATH)
-#     print(f"Files in {DOC_PATH}: {files}")
-#     return {"files": files}
-
 @app.get("/files/{folder_name}")
 async def list_files(folder_name: str = None):
     """
@@ -181,10 +175,6 @@ async def run_multi_agents():
     return await execute_multi_agents(manager)
 
 
-# @app.post("/upload/")
-# async def upload_file(file: UploadFile = File(...)):
-#     return await handle_file_upload(file, DOC_PATH)
-
 #New upload file option
 @app.post("/upload/{folder_name}")
 async def upload_file(folder_name: str, file: UploadFile = File(...)):
@@ -201,21 +191,53 @@ async def upload_file(folder_name: str, file: UploadFile = File(...)):
 # async def delete_file(filename: str):
 #     return await handle_file_deletion(filename, DOC_PATH)
 
-@app.delete("/files/{filename}")
-async def delete_file(filename: str, folder_name: str):
+@app.delete("/folders/{folder_name}")
+async def delete_folder(folder_name: str):
     """
-    Endpoint to delete a file from a user-specific folder.
+    Delete an entire folder and all its contents.
     Args:
-        filename (str): The name of the file to delete.
-        folder_name (str): The name of the user-specific folder.
+        folder_name (str): The name of the folder to delete.
     Returns:
         dict: A message indicating success or failure.
     """
     try:
-        if not folder_name:
-            raise HTTPException(status_code=400, detail="Folder name is required.")
-        user_folder_path = os.path.join(DOC_PATH, folder_name)
-        return await handle_file_deletion(filename, user_folder_path)
+        # Construct the full folder path
+        folder_path = os.path.join(DOC_PATH, folder_name)
+        
+        # Check if the folder exists
+        if not os.path.exists(folder_path):
+            raise HTTPException(status_code=404, detail=f"Folder '{folder_name}' not found.")
+        
+        # Delete the folder and its contents
+        shutil.rmtree(folder_path)
+        return {"status": "success", "message": f"Folder '{folder_name}' deleted successfully."}
+    
+    except Exception as e:
+        logger.error(f"Error deleting folder: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/files/{folder_name}/{filename}")
+async def delete_file(folder_name: str, filename: str):
+    """
+    Delete a specific file in a folder.
+    Args:
+        folder_name (str): The name of the folder containing the file.
+        filename (str): The name of the file to delete.
+    Returns:
+        dict: A message indicating success or failure.
+    """
+    try:
+        # Construct the full file path
+        file_path = os.path.join(DOC_PATH, folder_name, filename)
+        
+        # Check if the file exists
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail=f"File '{filename}' not found in folder '{folder_name}'.")
+        
+        # Delete the file
+        os.remove(file_path)
+        return {"status": "success", "message": f"File '{filename}' deleted successfully from folder '{folder_name}'."}
+    
     except Exception as e:
         logger.error(f"Error deleting file: {e}")
         raise HTTPException(status_code=500, detail=str(e))
