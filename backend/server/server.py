@@ -2,13 +2,13 @@ import json
 import os
 from typing import Dict, List
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, File, UploadFile, Header
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, File, UploadFile, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
-
-from backend.server.websocket_manager import WebSocketManager
+from gpt_researcher.utils.enum import ReportType, Tone, ReportSource
+from backend.server.websocket_manager import WebSocketManager, run_agent
 from backend.server.server_utils import (
     get_config_dict,
     update_environment_variables, handle_file_upload, handle_file_deletion,
@@ -36,6 +36,12 @@ logging.basicConfig(
 
 # Models
 
+# Pydantic model for the new endpoint
+class GenerateReportRequest(BaseModel):
+    prompt: str
+    tone: Tone
+    report_source: ReportSource
+    report_type: ReportType
 
 class ResearchRequest(BaseModel):
     task: str
@@ -97,16 +103,40 @@ def startup_event():
 
 # Routes
 
+# Create a folder to upload files per user's given folder name
+@app.post("/create-folder/{folder_name}")
+async def create_folder(folder_name: str):
+    """
+    Create a new folder under the DOC_PATH directory.
+    """
+    folder_path = os.path.join(DOC_PATH, folder_name)
+    try:
+        os.makedirs(folder_path, exist_ok=True)
+        return {"status": "success", "message": f"Folder '{folder_name}' created successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/")
 async def read_root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request, "report": None})
 
 
-@app.get("/files/")
-async def list_files():
-    files = os.listdir(DOC_PATH)
-    print(f"Files in {DOC_PATH}: {files}")
+# @app.get("/files/")
+# async def list_files():
+#     files = os.listdir(DOC_PATH)
+#     print(f"Files in {DOC_PATH}: {files}")
+#     return {"files": files}
+
+@app.get("/files/{folder_name}")
+async def list_files(folder_name: str = None):
+    """
+    List files in a specific folder under the DOC_PATH directory.
+    """
+    folder_path = os.path.join(DOC_PATH, folder_name) if folder_name else DOC_PATH
+    if not os.path.exists(folder_path):
+        raise HTTPException(status_code=404, detail=f"Folder '{folder_name}' does not exist.")
+
+    files = os.listdir(folder_path)
     return {"files": files}
 
 
@@ -115,15 +145,44 @@ async def run_multi_agents():
     return await execute_multi_agents(manager)
 
 
-@app.post("/upload/")
-async def upload_file(file: UploadFile = File(...)):
-    return await handle_file_upload(file, DOC_PATH)
+# @app.post("/upload/")
+# async def upload_file(file: UploadFile = File(...)):
+#     return await handle_file_upload(file, DOC_PATH)
 
+#New upload file option
+@app.post("/upload/{folder_name}")
+async def upload_file(folder_name: str, file: UploadFile = File(...)):
+    """
+    Upload a file to a specific folder under the DOC_PATH directory.
+    """
+    folder_path = os.path.join(DOC_PATH, folder_name)
+    if not os.path.exists(folder_path):
+        raise HTTPException(status_code=404, detail=f"Folder '{folder_name}' does not exist.")
+
+    return await handle_file_upload(file, folder_path)
+
+# @app.delete("/files/{filename}")
+# async def delete_file(filename: str):
+#     return await handle_file_deletion(filename, DOC_PATH)
 
 @app.delete("/files/{filename}")
-async def delete_file(filename: str):
-    return await handle_file_deletion(filename, DOC_PATH)
-
+async def delete_file(filename: str, folder_name: str):
+    """
+    Endpoint to delete a file from a user-specific folder.
+    Args:
+        filename (str): The name of the file to delete.
+        folder_name (str): The name of the user-specific folder.
+    Returns:
+        dict: A message indicating success or failure.
+    """
+    try:
+        if not folder_name:
+            raise HTTPException(status_code=400, detail="Folder name is required.")
+        user_folder_path = os.path.join(DOC_PATH, folder_name)
+        return await handle_file_deletion(filename, user_folder_path)
+    except Exception as e:
+        logger.error(f"Error deleting file: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -132,3 +191,100 @@ async def websocket_endpoint(websocket: WebSocket):
         await handle_websocket_communication(websocket, manager)
     except WebSocketDisconnect:
         await manager.disconnect(websocket)
+
+
+
+# New endpoint to generate a report synchronously
+# @app.post("/generate-report")
+# async def generate_report(request: GenerateReportRequest):
+#     try:
+#         # Extract inputs from the request
+#         task = request.prompt
+#         tone = request.tone
+#         report_source = request.report_source
+#         report_type = request.report_type
+
+#         # Run the research task synchronously
+#         report = await run_agent(
+#             task=task,
+#             report_type=report_type.value,  # Pass the enum value
+#             report_source=report_source.value,  # Pass the enum value
+#             tone=tone.value,  # Pass the enum value
+#             websocket=None,  # No WebSocket for this endpoint
+#             headers=None, 
+#             source_urls=[],  # No specific URLs
+#             document_urls=[], # Add headers if needed
+#             query_domains=[],  # Add query domains if needed
+#             config_path="default"  # Add config path if needed
+#         )
+
+#         # Return the generated report
+#         return {"status": "success", "report": report}
+
+#     except Exception as e:
+#         # Handle errors
+#         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@app.post("/generate-report")
+async def generate_report(request: GenerateReportRequest, folder_name: str = None, 
+                          tavily_api_key: str = None, open_ai_key
+                          : str = None):
+    """
+    Generate a report using the specified folder's documents.
+    """
+    try:
+        # Extract inputs from the request
+        task = request.prompt
+        tone = request.tone
+        report_source = request.report_source
+        report_type = request.report_type
+
+        # If the user provides a Tavily API key, update the environment variables
+        if tavily_api_key:
+            os.environ["TAVILY_API_KEY"] = tavily_api_key
+
+        if open_ai_key:
+            os.environ["OPENAI_API_KEY"] = open_ai_key
+
+        # Determine the document path
+        if folder_name:
+            document_path = os.path.join(DOC_PATH, folder_name)
+            if not os.path.exists(document_path):
+                raise HTTPException(status_code=404, detail=f"Folder '{folder_name}' does not exist.")
+        else:
+            document_path = DOC_PATH
+
+        # Get the list of documents in the folder
+        document_urls = [os.path.join(document_path, f) for f in os.listdir(document_path) if os.path.isfile(os.path.join(document_path, f))]
+
+        # Run the research task synchronously
+        report = await run_agent(
+            task=task,
+            report_type=report_type.value,  # Pass the enum value
+            report_source=report_source.value,  # Pass the enum value
+            tone=tone.value,  # Pass the enum value
+            websocket=None,  # No WebSocket for this endpoint
+            headers=None,
+            source_urls=[],  # No specific URLs
+            document_urls=document_urls,  # Use documents from the specified folder
+            query_domains=[],  # Add query domains if needed
+            config_path="default"  # Add config path if needed
+        )
+
+        # Return the generated report
+        return {"status": "success", "report": report}
+
+    except Exception as e:
+        # Handle errors
+        raise HTTPException(status_code=500, detail=str(e))
+    
+
+
+# {
+#   "prompt": "What is the exams project?",
+#   "tone": "Analytical (critical evaluation and detailed examination of data and theories)",
+#   "report_source": "local",
+#   "report_type": "detailed_report"
+# }

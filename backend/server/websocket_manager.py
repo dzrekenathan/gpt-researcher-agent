@@ -136,5 +136,7 @@ async def run_agent(task, report_type, report_source, source_urls, document_urls
             headers=headers
         )
         report = await researcher.run()
-
+        
     return report
+
+

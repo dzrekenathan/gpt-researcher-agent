@@ -12,6 +12,7 @@ from pathlib import Path
 from datetime import datetime
 from fastapi import HTTPException
 import logging
+from fastapi import UploadFile
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -66,18 +67,36 @@ class CustomLogsHandler:
         logger.debug(f"Log entry written to: {self.log_file}")
 
 
+# class Researcher:
+#     def __init__(self, query: str, report_type: str = "research_report"):
+#         self.query = query
+#         self.report_type = report_type
+#         # Generate unique ID for this research task
+#         self.research_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{hash(query)}"
+#         # Initialize logs handler with research ID
+#         self.logs_handler = CustomLogsHandler(None, self.research_id)
+#         self.researcher = GPTResearcher(
+#             query=query,
+#             report_type=report_type,
+#             websocket=self.logs_handler
+#         )
+# Researcher class updated
 class Researcher:
-    def __init__(self, query: str, report_type: str = "research_report"):
+    def __init__(self, query: str, report_type: str = "research_report", folder_name: str = None):
         self.query = query
         self.report_type = report_type
-        # Generate unique ID for this research task
+        self.folder_name = folder_name
         self.research_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{hash(query)}"
-        # Initialize logs handler with research ID
         self.logs_handler = CustomLogsHandler(None, self.research_id)
+        
+        # Get documents from specified folder
+        self.document_urls = get_folder_documents(folder_name)
+        
         self.researcher = GPTResearcher(
             query=query,
             report_type=report_type,
-            websocket=self.logs_handler
+            websocket=self.logs_handler,
+            document_urls=self.document_urls
         )
 
     async def research(self) -> dict:
@@ -116,52 +135,81 @@ def sanitize_filename(filename: str) -> str:
     return re.sub(r"[^\w\s-]", "", sanitized).strip()
 
 
+# async def handle_start_command(websocket, data: str, manager):
+#     json_data = json.loads(data[6:])
+#     (
+#         task,
+#         report_type,
+#         source_urls,
+#         document_urls,
+#         tone,
+#         headers,
+#         report_source,
+#         query_domains,
+#     ) = extract_command_data(json_data)
+
+#     if not task or not report_type:
+#         print("Error: Missing task or report_type")
+#         return
+
+#     # Create logs handler with websocket and task
+#     logs_handler = CustomLogsHandler(websocket, task)
+#     # Initialize log content with query
+#     await logs_handler.send_json({
+#         "query": task,
+#         "sources": [],
+#         "context": [],
+#         "report": ""
+#     })
+
+#     sanitized_filename = sanitize_filename(f"task_{int(time.time())}_{task}")
+
+#     report = await manager.start_streaming(
+#         task,
+#         report_type,
+#         report_source,
+#         source_urls,
+#         document_urls,
+#         tone,
+#         websocket,
+#         headers,
+#         query_domains,
+#     )
+#     report = str(report)
+#     file_paths = await generate_report_files(report, sanitized_filename)
+#     # Add JSON log path to file_paths
+#     file_paths["json"] = os.path.relpath(logs_handler.log_file)
+#     await send_file_paths(websocket, file_paths)
+# Handle Start Command Updated
 async def handle_start_command(websocket, data: str, manager):
     json_data = json.loads(data[6:])
     (
         task,
         report_type,
         source_urls,
-        document_urls,
+        folder_name,  # Added folder name parameter
         tone,
         headers,
         report_source,
         query_domains,
     ) = extract_command_data(json_data)
 
-    if not task or not report_type:
-        print("Error: Missing task or report_type")
-        return
-
-    # Create logs handler with websocket and task
-    logs_handler = CustomLogsHandler(websocket, task)
-    # Initialize log content with query
-    await logs_handler.send_json({
-        "query": task,
-        "sources": [],
-        "context": [],
-        "report": ""
-    })
-
+    # Get documents from specified folder
+    document_urls = get_folder_documents(folder_name)
+    
+    # Rest of the existing code...
     sanitized_filename = sanitize_filename(f"task_{int(time.time())}_{task}")
-
-    report = await manager.start_streaming(
-        task,
-        report_type,
-        report_source,
-        source_urls,
-        document_urls,
-        tone,
-        websocket,
-        headers,
-        query_domains,
-    )
-    report = str(report)
-    file_paths = await generate_report_files(report, sanitized_filename)
-    # Add JSON log path to file_paths
-    file_paths["json"] = os.path.relpath(logs_handler.log_file)
-    await send_file_paths(websocket, file_paths)
-
+    
+    # Modified to include folder name in report generation
+    file_paths = await generate_report_files(report, sanitized_filename, folder_name)
+    
+    # Return paths relative to output directory
+    return {
+        "output": {
+            **file_paths,
+            "json": os.path.relpath(logs_handler.log_file)
+        }
+    }
 
 async def handle_human_feedback(data: str):
     feedback_data = json.loads(data[14:])  # Remove "human_feedback" prefix
@@ -173,15 +221,38 @@ async def handle_chat(websocket, data: str, manager):
     print(f"Received chat message: {json_data.get('message')}")
     await manager.chat(json_data.get("message"), websocket)
 
-async def generate_report_files(report: str, filename: str) -> Dict[str, str]:
-    pdf_path = await write_md_to_pdf(report, filename)
-    docx_path = await write_md_to_word(report, filename)
-    md_path = await write_text_to_md(report, filename)
-    return {"pdf": pdf_path, "docx": docx_path, "md": md_path}
+# async def generate_report_files(report: str, filename: str) -> Dict[str, str]:
+#     pdf_path = await write_md_to_pdf(report, filename)
+#     docx_path = await write_md_to_word(report, filename)
+#     md_path = await write_text_to_md(report, filename)
+#     return {"pdf": pdf_path, "docx": docx_path, "md": md_path}
+# Generate report files method updated
+async def generate_report_files(report: str, filename: str, folder_name: str = None) -> Dict[str, str]:
+    """Generate report files in folder-specific output directory"""
+    base_output = Path(os.getenv("OUTPUT_PATH", "outputs"))
+    
+    if folder_name:
+        output_dir = base_output / folder_name
+        output_dir.mkdir(exist_ok=True)
+    else:
+        output_dir = base_output
+        
+    sanitized_name = sanitize_filename(filename)
+    
+    pdf_path = await write_md_to_pdf(report, str(output_dir / sanitized_name))
+    docx_path = await write_md_to_word(report, str(output_dir / sanitized_name))
+    md_path = await write_text_to_md(report, str(output_dir / sanitized_name))
+    
+    return {
+        "pdf": str(pdf_path.relative_to(base_output)),
+        "docx": str(docx_path.relative_to(base_output)),
+        "md": str(md_path.relative_to(base_output))
+    }
 
 
 async def send_file_paths(websocket, file_paths: Dict[str, str]):
     await websocket.send_json({"type": "path", "output": file_paths})
+
 
 
 def get_config_dict(
@@ -212,17 +283,44 @@ def update_environment_variables(config: Dict[str, str]):
         os.environ[key] = value
 
 
-async def handle_file_upload(file, DOC_PATH: str) -> Dict[str, str]:
-    file_path = os.path.join(DOC_PATH, os.path.basename(file.filename))
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    print(f"File uploaded to {file_path}")
+# async def handle_file_upload(file, DOC_PATH: str) -> Dict[str, str]:
+#     file_path = os.path.join(DOC_PATH, os.path.basename(file.filename))
+#     with open(file_path, "wb") as buffer:
+#         shutil.copyfileobj(file.file, buffer)
+#     print(f"File uploaded to {file_path}")
 
-    document_loader = DocumentLoader(DOC_PATH)
-    await document_loader.load()
+#     document_loader = DocumentLoader(DOC_PATH)
+#     await document_loader.load()
 
-    return {"filename": file.filename, "path": file_path}
-
+#     return {"filename": file.filename, "path": file_path}
+# Handle file upload method updated
+async def handle_file_upload(file: UploadFile, folder_name: str = None) -> Dict[str, str]:
+    """Handle file upload to specific folder with validation"""
+    base_path = os.getenv("DOC_PATH", "./my-docs")
+    folder_path = os.path.join(base_path, folder_name) if folder_name else base_path
+    
+    # Create folder if it doesn't exist
+    os.makedirs(folder_path, exist_ok=True)
+    
+    file_path = os.path.join(folder_path, file.filename)
+    
+    # Check if file already exists
+    if os.path.exists(file_path):
+        raise HTTPException(status_code=400, detail="File already exists")
+    
+    try:
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        # Load only the newly uploaded document
+        document_loader = DocumentLoader([file_path])
+        await document_loader.load()
+        
+        return {"filename": file.filename, "path": file_path}
+    
+    except Exception as e:
+        logger.error(f"Error uploading file: {str(e)}")
+        raise HTTPException(status_code=500, detail="File upload failed")
 
 async def handle_file_deletion(filename: str, DOC_PATH: str) -> JSONResponse:
     file_path = os.path.join(DOC_PATH, os.path.basename(filename))
@@ -263,14 +361,41 @@ async def handle_websocket_communication(websocket, manager):
             break
 
 
+# def extract_command_data(json_data: Dict) -> tuple:
+#     return (
+#         json_data.get("task"),
+#         json_data.get("report_type"),
+#         json_data.get("source_urls"),
+#         json_data.get("document_urls"),
+#         json_data.get("tone"),
+#         json_data.get("headers", {}),
+#         json_data.get("report_source"),
+#         json_data.get("query_domains", []),
+#     )
+
 def extract_command_data(json_data: Dict) -> tuple:
     return (
         json_data.get("task"),
         json_data.get("report_type"),
         json_data.get("source_urls"),
-        json_data.get("document_urls"),
+        json_data.get("folder_name"),  # Added folder name extraction
         json_data.get("tone"),
         json_data.get("headers", {}),
         json_data.get("report_source"),
         json_data.get("query_domains", []),
     )
+
+# This should get the endpoint to the file location
+def get_folder_documents(folder_name: str = None) -> List[str]:
+    """Get document paths from specified folder or root DOC_PATH"""
+    base_path = os.getenv("DOC_PATH", "./my-docs")
+    folder_path = os.path.join(base_path, folder_name) if folder_name else base_path
+    
+    if not os.path.exists(folder_path):
+        raise HTTPException(status_code=404, detail=f"Folder '{folder_name}' not found")
+    
+    return [
+        os.path.join(folder_path, f)
+        for f in os.listdir(folder_path)
+        if os.path.isfile(os.path.join(folder_path, f))
+    ]
