@@ -94,10 +94,10 @@ DOC_PATH = os.getenv("DOC_PATH", "./my-docs")
 # Startup event
 
 
-@app.get('/root')
+@app.get('/health')
 async def root():
     return {
-        "health": "ok",
+        "status": "ok",
         "version": "0.0.1",
     }
 
