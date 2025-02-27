@@ -157,7 +157,7 @@ async def read_root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request, "report": None})
 
 
-@app.get("/files/{folder_name}")
+@app.get("/{folder_name}/files")
 async def list_files(folder_name: str = None):
     """
     List files in a specific folder under the DOC_PATH directory.
