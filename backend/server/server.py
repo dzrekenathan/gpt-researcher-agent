@@ -150,7 +150,6 @@ async def list_folders():
         folders = [f for f in os.listdir(DOC_PATH) if os.path.isdir(os.path.join(DOC_PATH, f))]
         return {"status": "success", "folders": folders}
     except Exception as e:
-        # os.makedirs(DOC_PATH, exist_ok=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/")
