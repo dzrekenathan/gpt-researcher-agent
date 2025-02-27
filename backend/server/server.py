@@ -111,19 +111,6 @@ def startup_event():
 
 # Routes
 
-# Create a folder to upload files per user's given folder name
-# @app.post("/create-folder/{folder_name}")
-# async def create_folder(folder_name: str):
-#     """
-#     Create a new folder under the DOC_PATH directory.
-#     """
-#     folder_path = os.path.join(DOC_PATH, folder_name)
-#     try:
-#         os.makedirs(folder_path, exist_ok=True)
-#         return {"status": "success", "message": f"Folder '{folder_name}' created successfully."}
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
 @app.post("/create-folder/{folder_name}")
 async def create_folder(folder_name: str):
     """
@@ -140,6 +127,35 @@ async def create_folder(folder_name: str):
         return {"status": "success", "message": f"Folder '{folder_name}' created successfully."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# @app.post("/create-folder/{folder_name}")
+# async def create_folder(folder_name: str):
+#     """
+#     Create a new folder under the DOC_PATH directory.
+#     """
+#     folder_path = os.path.join(DOC_PATH, folder_name)
+    
+#     # Check if folder already exists
+#     if os.path.exists(folder_path):
+#         raise HTTPException(status_code=400, detail=f"Folder '{folder_name}' already exists.")
+    
+#     try:
+#         os.makedirs(folder_path, exist_ok=True)
+#         return {"status": "success", "message": f"Folder '{folder_name}' created successfully."}
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
+# @app.get("/list-folders")
+# async def list_folders():
+#     """
+#     List all folders under the DOC_PATH directory.
+#     """
+#     try:
+#         # Get all directories under DOC_PATH
+#         folders = [f for f in os.listdir(DOC_PATH) if os.path.isdir(os.path.join(DOC_PATH, f))]
+#         return {"status": "success", "folders": folders}
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/list-folders")
 async def list_folders():
@@ -170,6 +186,18 @@ async def list_files(folder_name: str = None):
     files = os.listdir(folder_path)
     return {"files": files}
 
+# @app.get("/{folder_name}/files")
+# async def list_files(folder_name: str = None):
+#     """
+#     List files in a specific folder under the DOC_PATH directory.
+#     """
+#     folder_path = os.path.join(DOC_PATH, folder_name) if folder_name else DOC_PATH
+#     if not os.path.exists(folder_path):
+#         raise HTTPException(status_code=404, detail=f"Folder '{folder_name}' does not exist.")
+
+#     files = os.listdir(folder_path)
+#     return {"files": files}
+
 
 @app.post("/api/multi_agents")
 async def run_multi_agents():
@@ -177,6 +205,16 @@ async def run_multi_agents():
 
 
 #New upload file option
+# @app.post("/upload/{folder_name}")
+# async def upload_file(folder_name: str, file: UploadFile = File(...)):
+#     """
+#     Upload a file to a specific folder under the DOC_PATH directory.
+#     """
+#     folder_path = os.path.join(DOC_PATH, folder_name)
+#     if not os.path.exists(folder_path):
+#         raise HTTPException(status_code=404, detail=f"Folder '{folder_name}' does not exist.")
+
+#     return await handle_file_upload(file, folder_path)
 @app.post("/upload/{folder_name}")
 async def upload_file(folder_name: str, file: UploadFile = File(...)):
     """
@@ -186,11 +224,7 @@ async def upload_file(folder_name: str, file: UploadFile = File(...)):
     if not os.path.exists(folder_path):
         raise HTTPException(status_code=404, detail=f"Folder '{folder_name}' does not exist.")
 
-    return await handle_file_upload(file, folder_path)
-
-# @app.delete("/files/{filename}")
-# async def delete_file(filename: str):
-#     return await handle_file_deletion(filename, DOC_PATH)
+    return await handle_file_upload(file, folder_name)
 
 @app.delete("/folders/{folder_name}")
 async def delete_folder(folder_name: str):
@@ -216,6 +250,31 @@ async def delete_folder(folder_name: str):
     except Exception as e:
         logger.error(f"Error deleting folder: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+# @app.delete("/folders/{folder_name}")
+# async def delete_folder(folder_name: str):
+#     """
+#     Delete an entire folder and all its contents.
+#     Args:
+#         folder_name (str): The name of the folder to delete.
+#     Returns:
+#         dict: A message indicating success or failure.
+#     """
+#     try:
+#         # Construct the full folder path
+#         folder_path = os.path.join(DOC_PATH, folder_name)
+        
+#         # Check if the folder exists
+#         if not os.path.exists(folder_path):
+#             raise HTTPException(status_code=404, detail=f"Folder '{folder_name}' not found.")
+        
+#         # Delete the folder and its contents
+#         shutil.rmtree(folder_path)
+#         return {"status": "success", "message": f"Folder '{folder_name}' deleted successfully."}
+    
+#     except Exception as e:
+#         logger.error(f"Error deleting folder: {e}")
+#         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.delete("/files/{folder_name}/{filename}")
 async def delete_file(folder_name: str, filename: str):
@@ -242,6 +301,32 @@ async def delete_file(folder_name: str, filename: str):
     except Exception as e:
         logger.error(f"Error deleting file: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# @app.delete("/files/{folder_name}/{filename}")
+# async def delete_file(folder_name: str, filename: str):
+#     """
+#     Delete a specific file in a folder.
+#     Args:
+#         folder_name (str): The name of the folder containing the file.
+#         filename (str): The name of the file to delete.
+#     Returns:
+#         dict: A message indicating success or failure.
+#     """
+#     try:
+#         # Construct the full file path
+#         file_path = os.path.join(DOC_PATH, folder_name, filename)
+        
+#         # Check if the file exists
+#         if not os.path.exists(file_path):
+#             raise HTTPException(status_code=404, detail=f"File '{filename}' not found in folder '{folder_name}'.")
+        
+#         # Delete the file
+#         os.remove(file_path)
+#         return {"status": "success", "message": f"File '{filename}' deleted successfully from folder '{folder_name}'."}
+    
+#     except Exception as e:
+#         logger.error(f"Error deleting file: {e}")
+#         raise HTTPException(status_code=500, detail=str(e))
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):

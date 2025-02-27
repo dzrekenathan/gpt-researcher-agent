@@ -283,54 +283,83 @@ def update_environment_variables(config: Dict[str, str]):
         os.environ[key] = value
 
 
-# async def handle_file_upload(file, DOC_PATH: str) -> Dict[str, str]:
-#     file_path = os.path.join(DOC_PATH, os.path.basename(file.filename))
-#     with open(file_path, "wb") as buffer:
-#         shutil.copyfileobj(file.file, buffer)
-#     print(f"File uploaded to {file_path}")
-
-#     document_loader = DocumentLoader(DOC_PATH)
-#     await document_loader.load()
-
-#     return {"filename": file.filename, "path": file_path}
-# Handle file upload method updated
 async def handle_file_upload(file: UploadFile, folder_name: str = None) -> Dict[str, str]:
-    """Handle file upload to specific folder with validation"""
+    """Handle file upload to a specific folder with validation."""
+    # Define the base path only once - this is the root directory
     base_path = os.getenv("DOC_PATH", "./my-docs")
-    folder_path = os.path.join(base_path, folder_name) if folder_name else base_path
     
-    # Create folder if it doesn't exist
+    # Ensure the base path exists
+    os.makedirs(base_path, exist_ok=True)
+    
+    # Construct the folder path based on whether a folder_name is provided
+    if folder_name:
+        folder_path = os.path.join(base_path, folder_name)
+    else:
+        folder_path = base_path
+    
+    # Create the specific folder if it doesn't exist
     os.makedirs(folder_path, exist_ok=True)
     
+    # Construct the full file path
     file_path = os.path.join(folder_path, file.filename)
     
-    # Check if file already exists
+    # Normalize the file path to avoid redundant separators
+    file_path = os.path.normpath(file_path)
+    
+    # Check if the file already exists
     if os.path.exists(file_path):
         raise HTTPException(status_code=400, detail="File already exists")
     
     try:
+        # Save the file
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         
-        # Load only the newly uploaded document
+        # Load the newly uploaded document (if needed)
         document_loader = DocumentLoader([file_path])
         await document_loader.load()
         
-        return {"filename": file.filename, "path": file_path}
+        # Return the correct path format
+        return {"filename": file.filename, "path": file_path.replace("\\", "/")}
     
     except Exception as e:
         logger.error(f"Error uploading file: {str(e)}")
         raise HTTPException(status_code=500, detail="File upload failed")
 
-async def handle_file_deletion(filename: str, DOC_PATH: str) -> JSONResponse:
-    file_path = os.path.join(DOC_PATH, os.path.basename(filename))
+
+async def handle_file_deletion(filename: str, folder_name: str = None) -> JSONResponse:
+    """Handle file deletion from a specific folder."""
+    base_path = os.getenv("DOC_PATH", "./my-docs")
+    
+    # Ensure the folder path is correctly constructed
+    folder_path = os.path.join(base_path, folder_name) if folder_name else base_path
+    
+    # Construct the full file path
+    file_path = os.path.join(folder_path, os.path.basename(filename))
+    
+    # Check if the file exists
     if os.path.exists(file_path):
-        os.remove(file_path)
-        print(f"File deleted: {file_path}")
-        return JSONResponse(content={"message": "File deleted successfully"})
+        try:
+            # Delete the file
+            os.remove(file_path)
+            logger.info(f"File deleted: {file_path}")
+            return JSONResponse(content={"message": "File deleted successfully"})
+        except Exception as e:
+            logger.error(f"Error deleting file: {str(e)}")
+            raise HTTPException(status_code=500, detail="File deletion failed")
     else:
-        print(f"File not found: {file_path}")
-        return JSONResponse(status_code=404, content={"message": "File not found"})
+        logger.warning(f"File not found: {file_path}")
+        raise HTTPException(status_code=404, detail="File not found")
+
+# async def handle_file_deletion(filename: str, DOC_PATH: str) -> JSONResponse:
+#     file_path = os.path.join(DOC_PATH, os.path.basename(filename))
+#     if os.path.exists(file_path):
+#         os.remove(file_path)
+#         print(f"File deleted: {file_path}")
+#         return JSONResponse(content={"message": "File deleted successfully"})
+#     else:
+#         print(f"File not found: {file_path}")
+#         return JSONResponse(status_code=404, content={"message": "File not found"})
 
 
 async def execute_multi_agents(manager) -> Any:
