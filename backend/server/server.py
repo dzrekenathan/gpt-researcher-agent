@@ -128,34 +128,7 @@ async def create_folder(folder_name: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# @app.post("/create-folder/{folder_name}")
-# async def create_folder(folder_name: str):
-#     """
-#     Create a new folder under the DOC_PATH directory.
-#     """
-#     folder_path = os.path.join(DOC_PATH, folder_name)
-    
-#     # Check if folder already exists
-#     if os.path.exists(folder_path):
-#         raise HTTPException(status_code=400, detail=f"Folder '{folder_name}' already exists.")
-    
-#     try:
-#         os.makedirs(folder_path, exist_ok=True)
-#         return {"status": "success", "message": f"Folder '{folder_name}' created successfully."}
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
 
-# @app.get("/list-folders")
-# async def list_folders():
-#     """
-#     List all folders under the DOC_PATH directory.
-#     """
-#     try:
-#         # Get all directories under DOC_PATH
-#         folders = [f for f in os.listdir(DOC_PATH) if os.path.isdir(os.path.join(DOC_PATH, f))]
-#         return {"status": "success", "folders": folders}
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/list-folders")
 async def list_folders():
@@ -186,17 +159,6 @@ async def list_files(folder_name: str = None):
     files = os.listdir(folder_path)
     return {"files": files}
 
-# @app.get("/{folder_name}/files")
-# async def list_files(folder_name: str = None):
-#     """
-#     List files in a specific folder under the DOC_PATH directory.
-#     """
-#     folder_path = os.path.join(DOC_PATH, folder_name) if folder_name else DOC_PATH
-#     if not os.path.exists(folder_path):
-#         raise HTTPException(status_code=404, detail=f"Folder '{folder_name}' does not exist.")
-
-#     files = os.listdir(folder_path)
-#     return {"files": files}
 
 
 @app.post("/api/multi_agents")
@@ -204,17 +166,6 @@ async def run_multi_agents():
     return await execute_multi_agents(manager)
 
 
-#New upload file option
-# @app.post("/upload/{folder_name}")
-# async def upload_file(folder_name: str, file: UploadFile = File(...)):
-#     """
-#     Upload a file to a specific folder under the DOC_PATH directory.
-#     """
-#     folder_path = os.path.join(DOC_PATH, folder_name)
-#     if not os.path.exists(folder_path):
-#         raise HTTPException(status_code=404, detail=f"Folder '{folder_name}' does not exist.")
-
-#     return await handle_file_upload(file, folder_path)
 @app.post("/upload/{folder_name}")
 async def upload_file(folder_name: str, file: UploadFile = File(...)):
     """
@@ -250,30 +201,6 @@ async def delete_folder(folder_name: str):
     except Exception as e:
         logger.error(f"Error deleting folder: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-# @app.delete("/folders/{folder_name}")
-# async def delete_folder(folder_name: str):
-#     """
-#     Delete an entire folder and all its contents.
-#     Args:
-#         folder_name (str): The name of the folder to delete.
-#     Returns:
-#         dict: A message indicating success or failure.
-#     """
-#     try:
-#         # Construct the full folder path
-#         folder_path = os.path.join(DOC_PATH, folder_name)
-        
-#         # Check if the folder exists
-#         if not os.path.exists(folder_path):
-#             raise HTTPException(status_code=404, detail=f"Folder '{folder_name}' not found.")
-        
-#         # Delete the folder and its contents
-#         shutil.rmtree(folder_path)
-#         return {"status": "success", "message": f"Folder '{folder_name}' deleted successfully."}
-    
-#     except Exception as e:
-#         logger.error(f"Error deleting folder: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.delete("/files/{folder_name}/{filename}")
@@ -337,6 +264,11 @@ async def websocket_endpoint(websocket: WebSocket):
         await manager.disconnect(websocket)
 
 
+# Returns report in a docx format
+from fastapi import Response
+from fastapi.responses import StreamingResponse
+from docx import Document
+import io
 
 @app.get("/generate-report")
 async def generate_report(
@@ -349,7 +281,7 @@ async def generate_report(
     open_ai_key: str = None  # Optional query parameter for the OpenAI API key
 ):
     """
-    Generate a report using query parameters.
+    Generate a report and return it as a .docx file.
     """
     try:
         # If the user provides a Tavily API key, update the environment variables
@@ -384,27 +316,42 @@ async def generate_report(
             config_path="default"  # Add config path if needed
         )
 
-        # Return the generated report
-        return {"status": "success", "report": report}
+        # Convert the report to a .docx file
+        doc = Document()
+        doc.add_heading("Generated Report", level=1)
+        doc.add_paragraph(report)  # Add the report content to the document
+
+        # Save the document to a BytesIO stream
+        file_stream = io.BytesIO()
+        doc.save(file_stream)
+        file_stream.seek(0)  # Move the cursor to the beginning of the stream
+
+        # Return the .docx file as a streaming response
+        return StreamingResponse(
+            file_stream,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f"attachment; filename=generated_report.docx"}
+        )
 
     except Exception as e:
         # Handle errors
         raise HTTPException(status_code=500, detail=str(e))
 
-# @app.post("/generate-report")
-# async def generate_report(request: GenerateReportRequest, folder_name: str = None, 
-#                           tavily_api_key: str = None, open_ai_key
-#                           : str = None,):
+
+# @app.get("/generate-report")
+# async def generate_report(
+#     prompt: str,  # Query parameter for the task/prompt
+#     tone: Tone,  # Query parameter for the tone
+#     report_source: ReportSource,  # Query parameter for the report source
+#     report_type: ReportType,  # Query parameter for the report type
+#     folder_name: str = None,  # Optional query parameter for the folder name
+#     tavily_api_key: str = None,  # Optional query parameter for the Tavily API key
+#     open_ai_key: str = None  # Optional query parameter for the OpenAI API key
+# ):
 #     """
-#     Generate a report using the specified folder's documents.
+#     Generate a report using query parameters.
 #     """
 #     try:
-#         # Extract inputs from the request
-        
-#         tone = request.tone
-#         report_source = request.report_source
-#         report_type = request.report_type
-
 #         # If the user provides a Tavily API key, update the environment variables
 #         if tavily_api_key:
 #             os.environ["TAVILY_API_KEY"] = tavily_api_key
@@ -425,7 +372,7 @@ async def generate_report(
 
 #         # Run the research task synchronously
 #         report = await run_agent(
-#             task=task,
+#             task=prompt,
 #             report_type=report_type.value,  # Pass the enum value
 #             report_source=report_source.value,  # Pass the enum value
 #             tone=tone.value,  # Pass the enum value
@@ -443,8 +390,6 @@ async def generate_report(
 #     except Exception as e:
 #         # Handle errors
 #         raise HTTPException(status_code=500, detail=str(e))
-    
-
 
 # {
 #   "prompt": "What is the exams project?",
