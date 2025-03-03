@@ -297,133 +297,6 @@ logger = logging.getLogger(__name__)
 
 
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# AWS S3 Configuration
-S3_BUCKET_NAME = "gptresearcher"  # Replace with your bucket name
-S3_REGION = "us-east-1"  # Replace with your bucket's region
-s3_client = boto3.client("s3")  # Initialize S3 client
-
-@app.get("/generate-report", response_class=JSONResponse)
-async def generate_report(
-    prompt: str,
-    tone: Tone,
-    report_source: ReportSource,
-    report_type: ReportType,
-    folder_name: str = None,
-    tavily_api_key: str = None,
-    open_ai_key: str = None
-):
-    """
-    Generate a report, save it as a .docx file in AWS S3, and return a download link.
-    """
-    try:
-        # Update environment variables if API keys are provided
-        if tavily_api_key:
-            os.environ["TAVILY_API_KEY"] = tavily_api_key
-            logger.info("Tavily API key set")
-
-        if open_ai_key:
-            os.environ["OPENAI_API_KEY"] = open_ai_key
-            logger.info("OpenAI API key set")
-
-        # Determine the document path
-        if folder_name:
-            document_path = os.path.join(DOC_PATH, folder_name)
-            if not os.path.exists(document_path):
-                raise HTTPException(status_code=404, detail=f"Folder '{folder_name}' does not exist.")
-        else:
-            document_path = DOC_PATH
-
-        # Get the list of documents in the folder
-        document_urls = [os.path.join(document_path, f) for f in os.listdir(document_path) if os.path.isfile(os.path.join(document_path, f))]
-        logger.info(f"Found {len(document_urls)} documents in {document_path}")
-
-        # Run the research task
-        logger.info(f"Running agent with prompt: {prompt}")
-        report = await run_agent(
-            task=prompt,
-            report_type=report_type.value,
-            report_source=report_source.value,
-            tone=tone.value,
-            websocket=None,
-            headers=None,
-            source_urls=[],
-            document_urls=document_urls,
-            query_domains=[],
-            config_path="default"
-        )
-
-        # Check if report is valid
-        if report is None:
-            logger.error("run_agent returned None")
-            raise HTTPException(status_code=500, detail="Failed to generate report: LLM response was empty")
-
-        # Convert report to string if it’s not already
-        if isinstance(report, bytes):
-            report_content = report.decode('utf-8')
-        elif isinstance(report, str):
-            report_content = report
-        else:
-            logger.error(f"Unexpected report type: {type(report)}")
-            raise ValueError(f"Report must be a string or bytes, got {type(report)}")
-
-        # Create a .docx file
-        doc = Document()
-        doc.add_heading("Generated Report", level=1)
-        doc.add_paragraph(report_content)
-
-        # Save the document to a BytesIO stream
-        file_stream = io.BytesIO()
-        doc.save(file_stream)
-        file_bytes = file_stream.getvalue()
-        file_stream.close()
-
-        # Generate a unique filename (e.g., using timestamp or UUID)
-        from datetime import datetime
-        filename = f"generated_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
-
-        # Upload the file to S3
-        try:
-            s3_client.put_object(
-                Bucket=S3_BUCKET_NAME,
-                Key=filename,
-                Body=file_bytes,
-                ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            )
-            logger.info(f"Uploaded {filename} to S3 bucket {S3_BUCKET_NAME}")
-        except ClientError as e:
-            logger.error(f"Failed to upload to S3: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Failed to upload to S3: {str(e)}")
-
-        # Generate a presigned URL for download (expires in 1 hour by default)
-        try:
-            download_url = s3_client.generate_presigned_url(
-                "get_object",
-                Params={"Bucket": S3_BUCKET_NAME, "Key": filename},
-                ExpiresIn=3600  # URL expires in 1 hour (3600 seconds)
-            )
-            logger.info(f"Generated presigned URL: {download_url}")
-        except ClientError as e:
-            logger.error(f"Failed to generate presigned URL: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Failed to generate download URL: {str(e)}")
-
-        # Return the download link as JSON
-        return JSONResponse(
-            content={
-                "status": "success",
-                "message": "Report generated and uploaded to S3",
-                "download_url": download_url
-            }
-        )
-
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        logger.exception(f"Error generating report: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error generating report: {str(e)}")
 
 
 # @app.get("/generate-report", response_class=Response)
@@ -576,58 +449,58 @@ async def generate_report(
 #         raise HTTPException(status_code=500, detail=str(e))
 
 
-# @app.get("/generate-report")
-# async def generate_report(
-#     prompt: str,  # Query parameter for the task/prompt
-#     tone: Tone,  # Query parameter for the tone
-#     report_source: ReportSource,  # Query parameter for the report source
-#     report_type: ReportType,  # Query parameter for the report type
-#     folder_name: str = None,  # Optional query parameter for the folder name
-#     tavily_api_key: str = None,  # Optional query parameter for the Tavily API key
-#     open_ai_key: str = None  # Optional query parameter for the OpenAI API key
-# ):
-#     """
-#     Generate a report using query parameters.
-#     """
-#     try:
-#         # If the user provides a Tavily API key, update the environment variables
-#         if tavily_api_key:
-#             os.environ["TAVILY_API_KEY"] = tavily_api_key
+@app.get("/generate-report")
+async def generate_report(
+    prompt: str,  # Query parameter for the task/prompt
+    tone: Tone,  # Query parameter for the tone
+    report_source: ReportSource,  # Query parameter for the report source
+    report_type: ReportType,  # Query parameter for the report type
+    folder_name: str = None,  # Optional query parameter for the folder name
+    tavily_api_key: str = None,  # Optional query parameter for the Tavily API key
+    open_ai_key: str = None  # Optional query parameter for the OpenAI API key
+):
+    """
+    Generate a report using query parameters.
+    """
+    try:
+        # If the user provides a Tavily API key, update the environment variables
+        if tavily_api_key:
+            os.environ["TAVILY_API_KEY"] = tavily_api_key
 
-#         if open_ai_key:
-#             os.environ["OPENAI_API_KEY"] = open_ai_key
+        if open_ai_key:
+            os.environ["OPENAI_API_KEY"] = open_ai_key
 
-#         # Determine the document path
-#         if folder_name:
-#             document_path = os.path.join(DOC_PATH, folder_name)
-#             if not os.path.exists(document_path):
-#                 raise HTTPException(status_code=404, detail=f"Folder '{folder_name}' does not exist.")
-#         else:
-#             document_path = DOC_PATH
+        # Determine the document path
+        if folder_name:
+            document_path = os.path.join(DOC_PATH, folder_name)
+            if not os.path.exists(document_path):
+                raise HTTPException(status_code=404, detail=f"Folder '{folder_name}' does not exist.")
+        else:
+            document_path = DOC_PATH
 
-#         # Get the list of documents in the folder
-#         document_urls = [os.path.join(document_path, f) for f in os.listdir(document_path) if os.path.isfile(os.path.join(document_path, f))]
+        # Get the list of documents in the folder
+        document_urls = [os.path.join(document_path, f) for f in os.listdir(document_path) if os.path.isfile(os.path.join(document_path, f))]
 
-#         # Run the research task synchronously
-#         report = await run_agent(
-#             task=prompt,
-#             report_type=report_type.value,  # Pass the enum value
-#             report_source=report_source.value,  # Pass the enum value
-#             tone=tone.value,  # Pass the enum value
-#             websocket=None,  # No WebSocket for this endpoint
-#             headers=None,
-#             source_urls=[],  # No specific URLs
-#             document_urls=document_urls,  # Use documents from the specified folder
-#             query_domains=[],  # Add query domains if needed
-#             config_path="default"  # Add config path if needed
-#         )
+        # Run the research task synchronously
+        report = await run_agent(
+            task=prompt,
+            report_type=report_type.value,  # Pass the enum value
+            report_source=report_source.value,  # Pass the enum value
+            tone=tone.value,  # Pass the enum value
+            websocket=None,  # No WebSocket for this endpoint
+            headers=None,
+            source_urls=[],  # No specific URLs
+            document_urls=document_urls,  # Use documents from the specified folder
+            query_domains=[],  # Add query domains if needed
+            config_path="default"  # Add config path if needed
+        )
 
-#         # Return the generated report
-#         return {"status": "success", "report": report}
+        # Return the generated report
+        return {"status": "success", "report": report}
 
-#     except Exception as e:
-#         # Handle errors
-#         raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        # Handle errors
+        raise HTTPException(status_code=500, detail=str(e))
 
 # {
 #   "prompt": "What is the exams project?",
